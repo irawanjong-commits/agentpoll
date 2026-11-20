@@ -33,6 +33,17 @@ Agent ID is the access-control layer of the product's core flow:
   themselves. No QR-code/pairing-code sign-in, no credential collection, no
   promised returns.
 
+## Deployment (BNB Chain mainnet)
+
+- **AgentPoll contract:** `0xe6FB29FfA159EB8eBE865D6f0a8793e360608a3c`
+- **Verified:** Sourcify **exact_match** (creation + runtime), 2026-11-20 —
+  https://sourcify.dev/#/lookup?addresses=0xe6FB29FfA159EB8eBE865D6f0a8793e360608a3c&chainIds=56
+- **Deployed via:** the public CREATE2 deployment proxy
+  `0x4e59b44847b379578588920cA78FbF26c0B4956C`, salt `0x00…00`, from the
+  project owner's Agentic Wallet; deployment tx
+  `0x253800f86b892600bb0282fa595f1f257e5cf0f633adb51693c6f29ff6777700`.
+- **Live app:** https://irawanjong-commits.github.io/agentpoll/
+
 ## Repository layout
 
 - `contracts/AgentPoll.sol` — the poll contract (MIT).
