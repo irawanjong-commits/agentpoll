@@ -32,8 +32,8 @@ official Agent ID contract address:</p>
 <button id="connect">1. Connect MetaMask</button>
 <button id="deploy" disabled>2. Deploy AgentPoll</button>
 <div id="log"></div>
-<script type="module">
-import { ethers } from 'https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.min.js';
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.min.js"></script>
+<script>
 const DEPLOY_DATA = '${deployData}';
 const log = (m) => { document.getElementById('log').textContent += m + '\\n'; };
 let provider, signer;

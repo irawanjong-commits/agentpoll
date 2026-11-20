@@ -4,15 +4,206 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentPoll — polls for Agent ID holders</title>
-<style>body{font-family:system-ui,sans-serif;margin:24px auto;max-width:560px;padding:0 16px;line-height:1.5}</style>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 640px; padding: 20px 16px 48px; line-height: 1.5; }
+  h1 { margin-bottom: 4px; }
+  .sub { opacity: .8; margin-top: 0; }
+  button { font-size: 15px; padding: 10px 16px; border-radius: 10px; border: 0; background: #f0b90b; color: #111; font-weight: 700; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.ghost { background: transparent; border: 1px solid #999; color: inherit; font-weight: 600; }
+  .card { border: 1px solid #8884; border-radius: 12px; padding: 16px; margin: 14px 0; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+  .ok { background: #1a9e5422; color: #1a9e54; border: 1px solid #1a9e54; }
+  .no { background: #d33a2c22; color: #d33a2c; border: 1px solid #d33a2c; }
+  .meta { font-size: 13px; opacity: .75; }
+  .opt { margin: 10px 0; }
+  .bar { height: 8px; border-radius: 4px; background: #8883; overflow: hidden; margin-top: 4px; }
+  .fill { height: 100%; background: #f0b90b; }
+  .optrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  input, select { font-size: 15px; padding: 9px; border-radius: 8px; border: 1px solid #999; width: 100%; box-sizing: border-box; margin: 5px 0; background: transparent; color: inherit; }
+  #log { white-space: pre-wrap; font-size: 14px; }
+  a { color: #b8860b; }
+  footer { margin-top: 36px; font-size: 13px; opacity: .75; }
+</style>
 </head>
 <body>
 <h1>🗳️ AgentPoll</h1>
-<p>On-chain polls exclusively for <b>Agent ID</b> holders on BNB Chain.
-Only holders of a <code>name.ai</code> Agent ID can create polls and vote —
-one address, one vote.</p>
-<p>The full web app launches here as soon as the contract deployment is
-confirmed on-chain.</p>
-<p><a href="https://github.com/irawanjong-commits/agentpoll">Source code (open-source, MIT)</a></p>
+<p class="sub">On-chain polls exclusively for <b>Agent ID</b> holders on BNB Chain.
+Only a <code>name.ai</code> holder can create a poll or vote — one address, one vote.</p>
+
+<div class="card">
+  <div>Wallet: <span id="who">not connected</span> <span id="agentBadge"></span></div>
+  <div class="meta">Contract: <a id="contractLink" href="#" target="_blank" rel="noopener"><code id="contractAddr">deployment pending</code></a></div>
+  <p><button id="connect">Connect wallet</button>
+     <button id="refresh" class="ghost">Refresh polls</button></p>
+  <div id="log"></div>
+</div>
+
+<div class="card" id="createCard">
+  <h3>Create a poll <span class="meta">(Agent ID holders only)</span></h3>
+  <input id="q" placeholder="Your question">
+  <div id="opts">
+    <input placeholder="Option 1">
+    <input placeholder="Option 2">
+  </div>
+  <p><button id="addOpt" class="ghost">+ Add option</button></p>
+  <label class="meta">Voting duration
+    <select id="dur">
+      <option value="86400">1 day</option>
+      <option value="259200">3 days</option>
+      <option value="604800" selected>7 days</option>
+      <option value="2592000">30 days</option>
+    </select>
+  </label>
+  <p><button id="create">Create poll</button></p>
+</div>
+
+<h3>Polls</h3>
+<div id="polls"><p class="meta">Loading…</p></div>
+
+<footer>
+  AgentPoll is an independent community project built for the Agent ID Hackathon.
+  It is not affiliated with Binance. The contract holds no funds and has no
+  owner/admin functions — <a href="https://github.com/irawanjong-commits/agentpoll" target="_blank" rel="noopener">read the open source code</a>.
+  You connect with your own wallet and confirm every transaction yourself;
+  nothing is ever collected from you.
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.min.js"></script>
+<script>
+// ===== CONFIG — set after deployment =====
+const CONTRACT_ADDRESS = '0x0000000000000000000000000000000000000000';
+const AGENT_ID = '0x60b9262456de011f7d15a54cdd8c48baaa8b022f';
+const READ_RPC = 'https://bsc-dataseed.bnbchain.org';
+const ABI = [
+  'function isAgent(address) view returns (bool)',
+  'function createPoll(string question, string[] options, uint256 durationSeconds) returns (uint256)',
+  'function vote(uint256 pollId, uint256 optionIndex)',
+  'function pollCount() view returns (uint256)',
+  'function getPoll(uint256 pollId) view returns (address creator, string question, string[] options, uint256[] counts, uint256 deadline, uint256 totalVotes)',
+  'function hasVoted(uint256 pollId, address account) view returns (bool)',
+  'function choiceOf(uint256 pollId, address account) view returns (uint256)'
+];
+
+const $ = (id) => document.getElementById(id);
+const log = (m) => { $('log').textContent = m; };
+const deployed = CONTRACT_ADDRESS !== '0x0000000000000000000000000000000000000000';
+if (deployed) {
+  $('contractAddr').textContent = CONTRACT_ADDRESS;
+  $('contractLink').href = 'https://bscscan.com/address/' + CONTRACT_ADDRESS;
+}
+const readProvider = new ethers.JsonRpcProvider(READ_RPC);
+const readContract = deployed ? new ethers.Contract(CONTRACT_ADDRESS, ABI, readProvider) : null;
+
+let provider, signer, myAddress = null, iAmAgent = false;
+
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+async function loadPolls() {
+  const box = $('polls');
+  if (!readContract) { box.innerHTML = '<p class="meta">The contract is being deployed — polls will appear here shortly.</p>'; return; }
+  try {
+    const n = Number(await readContract.pollCount());
+    if (n === 0) { box.innerHTML = '<p class="meta">No polls yet. Be the first Agent ID holder to create one!</p>'; return; }
+    box.innerHTML = '';
+    for (let id = n - 1; id >= 0; id--) {
+      const p = await readContract.getPoll(id);
+      const total = Number(p.totalVotes);
+      const closed = Date.now() / 1000 >= Number(p.deadline);
+      let voted = false, choice = -1;
+      if (myAddress) {
+        voted = await readContract.hasVoted(id, myAddress);
+        if (voted) choice = Number(await readContract.choiceOf(id, myAddress));
+      }
+      const card = document.createElement('div');
+      card.className = 'card';
+      let html = '<b>' + escapeHtml(p.question) + '</b>' +
+        '<div class="meta">by ' + p.creator.slice(0, 6) + '…' + p.creator.slice(-4) +
+        ' · ' + total + ' vote' + (total === 1 ? '' : 's') + ' · ' +
+        (closed ? 'closed' : 'ends ' + new Date(Number(p.deadline) * 1000).toLocaleString()) + '</div>';
+      p.options.forEach((opt, i) => {
+        const c = Number(p.counts[i]);
+        const pct = total ? Math.round(c * 100 / total) : 0;
+        html += '<div class="opt"><div class="optrow"><span>' + escapeHtml(opt) +
+          (i === choice ? ' ✓ <i>your vote</i>' : '') + '</span><span class="meta">' + c + ' · ' + pct + '%</span></div>' +
+          '<div class="bar"><div class="fill" style="width:' + pct + '%"></div></div>';
+        if (myAddress && iAmAgent && !voted && !closed)
+          html += '<p><button data-vote="' + id + ':' + i + '">Vote: ' + escapeHtml(opt) + '</button></p>';
+        html += '</div>';
+      });
+      if (myAddress && !iAmAgent) html += '<p class="meta">Connect an Agent ID holder wallet to vote.</p>';
+      if (voted) html += '<p class="meta">You already voted on this poll.</p>';
+      card.innerHTML = html;
+      box.appendChild(card);
+    }
+    box.querySelectorAll('[data-vote]').forEach(btn => btn.onclick = () => doVote(btn.dataset.vote));
+  } catch (e) { box.innerHTML = '<p class="meta">Could not load polls: ' + escapeHtml(e.message || ('' + e)) + '</p>'; }
+}
+
+async function doVote(spec) {
+  const parts = spec.split(':').map(Number);
+  const pollId = parts[0], optionIndex = parts[1];
+  try {
+    log('Sending your vote — confirm it in your wallet…');
+    const c = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+    const tx = await c.vote(pollId, optionIndex);
+    await tx.wait();
+    log('Vote confirmed: ' + tx.hash);
+    loadPolls();
+  } catch (e) { log('Vote failed: ' + (e.shortMessage || e.message || e)); }
+}
+
+$('connect').onclick = async () => {
+  try {
+    if (!window.ethereum) { log('No wallet found. Open this page in your wallet app browser (e.g. MetaMask or Binance Wallet).'); return; }
+    provider = new ethers.BrowserProvider(window.ethereum);
+    const net = await provider.getNetwork();
+    if (net.chainId !== 56n) {
+      try { await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] }); }
+      catch { log('Please switch your wallet to BNB Chain (56) and try again.'); return; }
+      provider = new ethers.BrowserProvider(window.ethereum);
+    }
+    signer = await provider.getSigner();
+    myAddress = await signer.getAddress();
+    $('who').textContent = myAddress;
+    if (readContract) {
+      iAmAgent = await readContract.isAgent(myAddress);
+      $('agentBadge').innerHTML = iAmAgent
+        ? '<span class="badge ok">Agent ID holder ✓</span>'
+        : '<span class="badge no">no Agent ID</span>';
+      log(iAmAgent ? 'Welcome, Agent ID holder. You can create polls and vote.' : 'This wallet does not hold an Agent ID, so it cannot create polls or vote.');
+    }
+    loadPolls();
+  } catch (e) { log('Connection failed: ' + (e.message || e)); }
+};
+
+$('addOpt').onclick = () => {
+  if ($('opts').children.length >= 8) return;
+  const i = document.createElement('input');
+  i.placeholder = 'Option ' + ($('opts').children.length + 1);
+  $('opts').appendChild(i);
+};
+
+$('create').onclick = async () => {
+  try {
+    if (!signer) { log('Connect your wallet first.'); return; }
+    if (!iAmAgent) { log('Only Agent ID holders can create polls.'); return; }
+    const question = $('q').value.trim();
+    const options = [...$('opts').querySelectorAll('input')].map(x => x.value.trim()).filter(Boolean);
+    if (!question) { log('Write a question first.'); return; }
+    if (options.length < 2) { log('Add at least 2 options.'); return; }
+    log('Creating your poll — confirm it in your wallet…');
+    const c = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+    const tx = await c.createPoll(question, options, Number($('dur').value));
+    await tx.wait();
+    log('Poll created: ' + tx.hash);
+    loadPolls();
+  } catch (e) { log('Create failed: ' + (e.shortMessage || e.message || e)); }
+};
+
+$('refresh').onclick = loadPolls;
+loadPolls();
+</script>
 </body>
 </html>
