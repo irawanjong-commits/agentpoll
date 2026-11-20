@@ -60,3 +60,7 @@ Agent ID is the access-control layer of the product's core flow:
 ## License
 
 MIT
+
+## Demo video
+
+[Watch the 55-second demo](https://irawanjong-commits.github.io/agentpoll/demo.mp4)
